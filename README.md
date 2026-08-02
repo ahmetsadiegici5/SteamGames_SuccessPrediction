@@ -7,9 +7,6 @@ Bu repo, Steam’de yayınlanan oyunların “başarılı olma” ihtimalini tah
 - Farklı denemelerle başarı tahmini için modelleme/analiz yapar
 - Sunum veya rapor için görsel çıktılar üretebilir
 
-## Dosyalar
-- `make_presentation_assets.py`: Sunumda kullanılacak görselleri/çıktıları üretmek için yardımcı script
-- `presentation_assets/`: Üretilen sunum görselleri / çıktılar
 
 ## Çalıştırma (genel)
 1. Python 3 kurulu olmalı
