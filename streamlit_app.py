@@ -44,7 +44,7 @@ except Exception:
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_DATASET = ROOT / "steam.csv"
+DEFAULT_DATASET = ROOT / "data/steam.csv"
 
 
 def parse_owners(val):
