@@ -21,5 +21,3 @@ Bu repo, Steam’de yayınlanan oyunların “başarılı olma” ihtimalini tah
 4. Script çalıştır:
    - `python make_presentation_assets.py`
 
-## Not
-Bu repo daha çok proje/deney çalışması şeklinde düzenlenmiştir. Net bir “tek komutla çalıştır” akışı istersen, hangi veri dosyalarını kullandığını da ekleyip README’yi ona göre güncelleyebilirim.
