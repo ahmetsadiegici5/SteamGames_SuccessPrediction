@@ -1,16 +1,10 @@
-"""\
-Minimal interactive dashboard for the Phase 3 final defense.
+"""Interactive dashboard for the Steam game success model.
 
-Goal: present the "Engine" (model) + a simple "Dashboard" view.
-- Uses ONLY pre-launch features.
-- Lets you adjust decision threshold to show recall/precision trade-off.
+Trains a classifier on pre-launch features only and lets you tune the
+decision threshold to explore the precision/recall trade-off.
 
 Run:
   streamlit run streamlit_app.py
-
-Notes:
-- Keeps the feature engineering consistent with the notebook/scripts.
-- Intended to be minimal (single page, no extra bells and whistles).
 """
 
 from __future__ import annotations
@@ -18,8 +12,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
 import streamlit as st
 
@@ -100,7 +96,6 @@ FEATURE_COLS = [
     "has_multiplayer",
     "has_publisher",
     "platform_count",
-    "name_length",
     "is_mature",
     "is_free",
     "season_Spring",
@@ -142,8 +137,6 @@ def engineer_features(df: pd.DataFrame) -> tuple[pd.DataFrame, float]:
         df.loc[df["platforms"].isna(), "platform_count"] = 0
     else:
         df["platform_count"] = 1
-
-    df["name_length"] = df["name"].fillna("").str.len()
 
     if "price" in df.columns:
         df["price_clean"] = pd.to_numeric(df["price"], errors="coerce")
@@ -214,15 +207,33 @@ def get_feature_importances(model, feature_names: list[str]) -> pd.DataFrame | N
     return None
 
 
+@st.cache_resource(show_spinner="Training model...")
+def train_model(csv_path: str, model_name: str):
+    """Prepare the data and train the model. Cached, so moving the threshold
+    slider does not retrain the model."""
+    raw = load_raw_dataset(csv_path)
+    df, owners_median = engineer_features(raw)
+
+    X = df[FEATURE_COLS].astype(float)
+    y = df["success"].astype(int)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    model = build_model(model_name, y_train)
+    model.fit(X_train, y_train)
+    return model, X_test, y_test, owners_median
+
+
 def main():
     st.set_page_config(page_title="Steam Visibility Dashboard", layout="wide")
 
     st.title("Steam Games — Pre-Launch Visibility Dashboard")
-    st.caption("Phase 3: Engine + Dashboard (minimal, recall-first)")
+    st.caption("Predict whether a game will be above the median owner count using pre-launch metadata only.")
 
     with st.sidebar:
-        st.header("Ayarlar")
-        dataset_path = st.text_input("Dataset yolu", value=str(DEFAULT_DATASET))
+        st.header("Settings")
+        dataset_path = st.text_input("Dataset path", value=str(DEFAULT_DATASET))
 
         model_choices = [
             "Logistic Regression (balanced)",
@@ -235,12 +246,45 @@ def main():
         threshold = st.slider("Decision threshold", min_value=0.05, max_value=0.95, value=0.50, step=0.01)
 
         st.divider()
-        st.write("**FN maliyeti** ve **FP maliyeti** (temsili):")
+        st.write("Illustrative cost of a **false negative** vs **false positive**:")
         fn_cost = st.number_input("FN cost ($)", min_value=0, value=10000, step=1000)
         fp_cost = st.number_input("FP cost ($)", min_value=0, value=1000, step=100)
 
     if not Path(dataset_path).exists():
-        st.error(f"Dataset bulunamadı: {dataset_path}")
+        st.error(f"Dataset not found: {dataset_path}")
+        st.stop()
+
+    model, X_test, y_test, owners_median = train_model(dataset_path, model_name)
+    return model, X_test, y_test, owners_median
+
+
+def main():
+    st.set_page_config(page_title="Steam Visibility Dashboard", layout="wide")
+
+    st.title("Steam Games — Pre-Launch Visibility Dashboard")
+    st.caption("Predict whether a game will be above the median owner count using pre-launch metadata only.")
+
+    with st.sidebar:
+        st.header("Settings")
+        dataset_path = st.text_input("Dataset path", value=str(DEFAULT_DATASET))
+
+        model_choices = [
+            "Logistic Regression (balanced)",
+            "Random Forest (balanced)",
+        ]
+        if HAS_XGBOOST:
+            model_choices.insert(0, "XGBoost (recall-first)")
+
+        model_name = st.selectbox("Model", options=model_choices, index=0)
+        threshold = st.slider("Decision threshold", min_value=0.05, max_value=0.95, value=0.50, step=0.01)
+
+        st.divider()
+        st.write("Illustrative cost of a **false negative** vs **false positive**:")
+        fn_cost = st.number_input("FN cost ($)", min_value=0, value=10000, step=1000)
+        fp_cost = st.number_input("FP cost ($)", min_value=0, value=1000, step=100)
+
+    if not Path(dataset_path).exists():
+        st.error(f"Dataset not found: {dataset_path}")
         st.stop()
 
     raw = load_raw_dataset(dataset_path)
@@ -282,8 +326,8 @@ def main():
     col5.metric("Cost (FN/FP)", f"${total_cost:,.0f}")
 
     st.write(
-        f"**Target tanımı:** owners_numeric > median (median = {owners_median:,.0f}).  "
-        f"**Test set:** {len(X_test):,} örnek | **Positives (hits):** {(y_test==1).sum():,}"
+        f"**Target:** owners_numeric > median (median = {owners_median:,.0f}).  "
+        f"**Test set:** {len(X_test):,} samples | **Positives (hits):** {(y_test==1).sum():,}"
     )
 
     left, right = st.columns([1, 1])
@@ -291,9 +335,6 @@ def main():
     with left:
         st.subheader("Confusion Matrix")
         st.write(f"TN={tn:,} | FP={fp:,} | FN={fn:,} | TP={tp:,}")
-
-        import matplotlib.pyplot as plt
-        import seaborn as sns
 
         fig, ax = plt.subplots(figsize=(5.5, 4.5))
         sns.heatmap(
@@ -317,8 +358,6 @@ def main():
         st.subheader("Precision–Recall Curve")
         precs, recs, ths = precision_recall_curve(y_test, y_proba)
 
-        import matplotlib.pyplot as plt
-
         fig, ax = plt.subplots(figsize=(6.5, 4.5))
         ax.plot(recs, precs)
         ax.set_xlabel("Recall")
@@ -332,11 +371,9 @@ def main():
     st.subheader("Feature Importance / Coefficients")
     imp = get_feature_importances(model, FEATURE_COLS)
     if imp is None:
-        st.info("Bu model için feature importance alınamadı.")
+        st.info("Feature importance is not available for this model.")
     else:
         topk = imp.head(12)
-
-        import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(9, 4.5))
         ax.barh(topk["feature"][::-1], topk["importance"][::-1])
@@ -345,12 +382,12 @@ def main():
         ax.grid(True, axis="x", alpha=0.3)
         st.pyplot(fig)
 
-    st.subheader("Actionable Game/Business Insights (özet)")
+    st.subheader("Key Insights")
     st.write(
-        "- Publisher backing ve multiplayer sinyali başarıyla pozitif ilişkili görünüyor.\n"
-        "- English desteği global görünürlüğü artırıyor.\n"
-        "- Season etkisi düşük; timing yerine ürün/dağıtım sinyalleri daha önemli.\n"
-        "- Threshold ile: recall ↑ yapınca FP ↑; bütçeye göre dengele."
+        "- Publisher backing and multiplayer support are positively associated with success.\n"
+        "- English support increases global visibility.\n"
+        "- Release season has a small effect; product and distribution signals matter more.\n"
+        "- Lowering the threshold raises recall at the cost of more false positives."
     )
 
 
